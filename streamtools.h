@@ -444,6 +444,75 @@ void FMPadding_nonsquare_Batch(stream<ap_uint<SIMD* In_t::width> > &in,
 }
 
 
+template<	unsigned int OutputDim_x,
+			unsigned int OutputDim_y,
+			unsigned int Padding_x,
+			unsigned int Padding_y,
+			unsigned int NumChannels,
+			unsigned int SIMD,
+			unsigned int M,			
+			typename In_t,
+      unsigned int PaddingStyle=2>
+void FMPadding_nonsquare_MMV(stream<ap_uint<SIMD*M* In_t::width> > &in,
+		stream<ap_uint<SIMD*M* In_t::width> > &out){
+
+	// Padding Up and Left
+  constexpr unsigned int PaddingUp = Padding_y/2 + ((PaddingStyle == 2) ? ((Padding_y % 2) > 0) : 0);
+  constexpr unsigned int PaddingLeft = Padding_x/2 + ((PaddingStyle == 2) ? ((Padding_x % 2) > 0) : 0);
+
+	// Padding Down and Right (might be 1 element more than up and left in case of odd padding)
+	constexpr unsigned int PaddingDown = Padding_y - PaddingUp;
+	constexpr unsigned int PaddingRight = Padding_x - PaddingLeft;
+	constexpr unsigned int Folding = NumChannels/SIMD;
+	ap_uint<SIMD*M* In_t::width> outData, inData;
+	ap_uint<SIMD* In_t::width> buffer_px; //only need to buffer 1 pixel if we assume 1 padded px on each side
+
+	// for now simplify for the following case: 1D (x=1), SIMD=NumChannels, Padding_y=2
+	// OutputDim_y is now the number of output blocks (containing M pixels each)!!
+	for(unsigned int y = 0; y<OutputDim_y; y++){
+#pragma HLS PIPELINE II=1
+		// Padding left
+		if(y < PaddingUp){
+			inData = in.read();
+			outData(SIMD*In_t::width-1, 0) = 0; //leftmost pixel
+			outData(SIMD*M*In_t::width-1, SIMD*In_t::width) = inData(SIMD*(M-1)*In_t::width-1, 0); //other pixels (e.g. 1 for M=2 or 3 for M=4)
+			buffer_px = inData(SIMD*M*In_t::width-1, SIMD*(M-1)*In_t::width); //rightmost pixel
+		}
+		// Padding right
+		else if (y >= (OutputDim_y - PaddingDown)){
+			outData(SIMD*In_t::width-1, 0) = buffer_px; //leftmost pixel
+			outData(SIMD*M*In_t::width-1, SIMD*In_t::width) = 0; //other pixels (e.g. 1 for M=2 or 3 for M=4)
+		}
+		// No Padding
+		else{
+			inData = in.read();
+			outData(SIMD*In_t::width-1, 0) = buffer_px; //leftmost pixel
+			outData(SIMD*M*In_t::width-1, SIMD*In_t::width) = inData(SIMD*(M-1)*In_t::width-1, 0); //other pixels (e.g. 1 for M=2 or 3 for M=4)
+			buffer_px = inData(SIMD*M*In_t::width-1, SIMD*(M-1)*In_t::width); //rightmost pixel
+		}
+
+		out.write(outData);
+	}
+}
+
+template<	unsigned int OutputDim_x,
+			unsigned int OutputDim_y,
+			unsigned int Padding_x,
+			unsigned int Padding_y,
+			unsigned int NumChannels,
+			unsigned int SIMD,
+			unsigned int M,
+			typename In_t,
+      unsigned int PaddingStyle=2>
+void FMPadding_nonsquare_Batch_MMV(stream<ap_uint<SIMD*M* In_t::width> > &in,
+		stream<ap_uint<SIMD*M* In_t::width> > &out,
+		const unsigned int numReps) {
+	for (unsigned int rep = 0; rep < numReps; rep++) {
+		FMPadding_nonsquare_MMV<OutputDim_x, OutputDim_y, Padding_x, Padding_y, NumChannels, SIMD, M, In_t, PaddingStyle>(in, out);
+	}
+
+}
+
 /**
  * \brief   Stream Data Width Converter - Converts the width of the input stream in the output stream
  *
@@ -620,6 +689,126 @@ void DuplicateStreams(stream<ap_uint<DataWidth> > & in, stream<ap_uint<DataWidth
 		
 		out1.write(e);
 		out2.write(e);
+	}
+}
+
+template<unsigned int InWidth,
+		unsigned int OutWidth,
+		unsigned int NumTotal
+>
+void SplitStreams_2(stream<ap_uint<InWidth> > & in, stream<ap_uint<OutWidth> > & out1,
+		stream<ap_uint<OutWidth> > & out2) {
+	
+	for (unsigned int i = 0; i < NumTotal; i++) {
+#pragma HLS PIPELINE II=1		
+		ap_uint<InWidth> e = in.read();
+		
+		out1.write(e(InWidth-1, OutWidth));
+		out2.write(e(OutWidth-1, 0));
+	}
+}
+
+template<unsigned int InWidth,
+		unsigned int OutWidth,
+		unsigned int NumTotal
+>
+void SplitStreams_4(stream<ap_uint<InWidth> > & in, stream<ap_uint<OutWidth> > & out1,
+		stream<ap_uint<OutWidth> > & out2, stream<ap_uint<OutWidth> > & out3,
+		stream<ap_uint<OutWidth> > & out4) {
+	
+	for (unsigned int i = 0; i < NumTotal; i++) {
+#pragma HLS PIPELINE II=1		
+		ap_uint<InWidth> e = in.read();
+		
+		out1.write(e(InWidth-1, OutWidth*3));
+		out2.write(e(OutWidth*3-1, OutWidth*2));
+		out3.write(e(OutWidth*2-1, OutWidth*1));
+		out4.write(e(OutWidth*1-1, 0));
+	}
+}
+
+template<unsigned int InWidth,
+		unsigned int OutWidth,
+		unsigned int NumTotal
+>
+void SplitStreams_8(stream<ap_uint<InWidth> > & in, stream<ap_uint<OutWidth> > & out1,
+		stream<ap_uint<OutWidth> > & out2, stream<ap_uint<OutWidth> > & out3,
+		stream<ap_uint<OutWidth> > & out4, stream<ap_uint<OutWidth> > & out5,
+		stream<ap_uint<OutWidth> > & out6, stream<ap_uint<OutWidth> > & out7,
+		stream<ap_uint<OutWidth> > & out8) {
+	
+	for (unsigned int i = 0; i < NumTotal; i++) {
+#pragma HLS PIPELINE II=1		
+		ap_uint<InWidth> e = in.read();
+		
+		out1.write(e(InWidth-1, OutWidth*7));
+		out2.write(e(OutWidth*7-1, OutWidth*6));
+		out3.write(e(OutWidth*6-1, OutWidth*5));
+		out4.write(e(OutWidth*5-1, OutWidth*4));
+		out5.write(e(OutWidth*4-1, OutWidth*3));
+		out6.write(e(OutWidth*3-1, OutWidth*2));
+		out7.write(e(OutWidth*2-1, OutWidth*1));
+		out8.write(e(OutWidth*1-1, 0));
+	}
+}
+
+template<unsigned int InWidth,
+		unsigned int OutWidth,
+		unsigned int NumTotal
+>
+void MergeStreams_2(stream<ap_uint<InWidth> > & in1, stream<ap_uint<InWidth> > & in2,
+		stream<ap_uint<OutWidth> > & out) {
+	
+	for (unsigned int i = 0; i < NumTotal; i++) {
+#pragma HLS PIPELINE II=1		
+		ap_uint<InWidth> e1 = in1.read();
+		ap_uint<InWidth> e2 = in2.read();
+		
+		out.write((e1,e2));
+	}
+}
+
+template<unsigned int InWidth,
+		unsigned int OutWidth,
+		unsigned int NumTotal
+>
+void MergeStreams_4(stream<ap_uint<InWidth> > & in1, stream<ap_uint<InWidth> > & in2,
+		stream<ap_uint<InWidth> > & in3, stream<ap_uint<InWidth> > & in4,
+		stream<ap_uint<OutWidth> > & out) {
+	
+	for (unsigned int i = 0; i < NumTotal; i++) {
+#pragma HLS PIPELINE II=1		
+		ap_uint<InWidth> e1 = in1.read();
+		ap_uint<InWidth> e2 = in2.read();
+		ap_uint<InWidth> e3 = in3.read();
+		ap_uint<InWidth> e4 = in4.read();
+		
+		out.write((e1,e2,e3,e4));
+	}
+}
+
+template<unsigned int InWidth,
+		unsigned int OutWidth,
+		unsigned int NumTotal
+>
+void MergeStreams_8(stream<ap_uint<InWidth> > & in1, stream<ap_uint<InWidth> > & in2,
+		stream<ap_uint<InWidth> > & in3, stream<ap_uint<InWidth> > & in4,
+		stream<ap_uint<InWidth> > & in5, stream<ap_uint<InWidth> > & in6,
+		stream<ap_uint<InWidth> > & in7, stream<ap_uint<InWidth> > & in8,
+		stream<ap_uint<OutWidth> > & out) {
+	
+	for (unsigned int i = 0; i < NumTotal; i++) {
+#pragma HLS PIPELINE II=1		
+		ap_uint<InWidth> e1 = in1.read();
+		ap_uint<InWidth> e2 = in2.read();
+		ap_uint<InWidth> e3 = in3.read();
+		ap_uint<InWidth> e4 = in4.read();
+		ap_uint<InWidth> e5 = in5.read();
+		ap_uint<InWidth> e6 = in6.read();
+		ap_uint<InWidth> e7 = in7.read();
+		ap_uint<InWidth> e8 = in8.read();
+		
+		out.write((e1,e2,e3,e4,e5,e6,e7,e8));
 	}
 }
 

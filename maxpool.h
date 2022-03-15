@@ -313,6 +313,137 @@ void StreamingMaxPool_Precision_Batch_1d(stream<ap_uint<InStreamW> > & in,
   }
 }
 
+template<unsigned int InWidth,
+		unsigned int OutWidth,
+		unsigned int channels,
+		unsigned int bitwidth,
+    typename ActType,
+		unsigned int NumTotal
+>
+void MaxPool_2_MMV_2(stream<ap_uint<InWidth> > & in, stream<ap_uint<OutWidth> > & out) {
+	
+	for (unsigned int i = 0; i < NumTotal; i++) {
+#pragma HLS PIPELINE II=1
+    ap_uint<InWidth> e = in.read();		
+		ap_uint<InWidth/2> p1 = e(InWidth/2-1, 0); //leftmost pixel
+		ap_uint<InWidth/2> p2 = e(InWidth-1, InWidth/2); //rightmost pixel
+
+		ap_uint<InWidth/2> pmax;
+		for(unsigned int ch = 0; ch<channels; ch++){
+#pragma HLS UNROLL                      
+			unsigned int lowBit = ch * bitwidth;
+			unsigned int highBit = (ch+1) * bitwidth -1;
+      ActType c1 = p1(highBit, lowBit);
+      ActType c2 = p2(highBit, lowBit);
+    	
+			if (c1 > c2)
+				pmax(highBit, lowBit) = c1;
+			else
+				pmax(highBit, lowBit) = c2;               
+    }
+		out.write(pmax);
+	}
+}
+
+template<unsigned int InWidth,
+		unsigned int OutWidth,
+		unsigned int channels,
+		unsigned int bitwidth,
+    typename ActType,
+		unsigned int NumTotal
+>
+void MaxPool_2_MMV_4(stream<ap_uint<InWidth> > & in, stream<ap_uint<OutWidth> > & out) {
+	
+	for (unsigned int i = 0; i < NumTotal; i++) {
+#pragma HLS PIPELINE II=1
+    ap_uint<InWidth> e = in.read();
+		ap_uint<InWidth/4> p1 = e(InWidth/4*1-1, 0); //leftmost pixel
+		ap_uint<InWidth/4> p2 = e(InWidth/4*2-1, InWidth/4*1);
+		ap_uint<InWidth/4> p3 = e(InWidth/4*3-1, InWidth/4*2);
+		ap_uint<InWidth/4> p4 = e(InWidth-1, InWidth/4*3); //rightmost pixel
+
+		ap_uint<InWidth/4> pmax12;
+		ap_uint<InWidth/4> pmax34;
+		for(unsigned int ch = 0; ch<channels; ch++){
+#pragma HLS UNROLL                      
+			unsigned int lowBit = ch * bitwidth;
+			unsigned int highBit = (ch+1) * bitwidth -1;
+      ActType c1 = p1(highBit, lowBit);
+      ActType c2 = p2(highBit, lowBit);
+      ActType c3 = p3(highBit, lowBit);
+      ActType c4 = p4(highBit, lowBit);
+
+			if (c1 > c2)
+				pmax12(highBit, lowBit) = c1;
+			else
+				pmax12(highBit, lowBit) = c2;                
+			if (c3 > c4)
+				pmax34(highBit, lowBit) = c3;
+			else
+				pmax34(highBit, lowBit) = c4;         
+      	}
+		out.write((pmax34,pmax12));
+	}
+}
+
+template<unsigned int InWidth,
+		unsigned int OutWidth,
+		unsigned int channels,
+		unsigned int bitwidth,
+    typename ActType,
+		unsigned int NumTotal
+>
+void MaxPool_2_MMV_8(stream<ap_uint<InWidth> > & in, stream<ap_uint<OutWidth> > & out) {
+	
+	for (unsigned int i = 0; i < NumTotal; i++) {
+#pragma HLS PIPELINE II=1
+    ap_uint<InWidth> e = in.read();
+		ap_uint<InWidth/8> p1 = e(InWidth/8*1-1, 0); //leftmost pixel
+		ap_uint<InWidth/8> p2 = e(InWidth/8*2-1, InWidth/8*1);
+		ap_uint<InWidth/8> p3 = e(InWidth/8*3-1, InWidth/8*2);
+    ap_uint<InWidth/8> p4 = e(InWidth/8*4-1, InWidth/8*3);
+    ap_uint<InWidth/8> p5 = e(InWidth/8*5-1, InWidth/8*4);
+    ap_uint<InWidth/8> p6 = e(InWidth/8*6-1, InWidth/8*5);
+    ap_uint<InWidth/8> p7 = e(InWidth/8*7-1, InWidth/8*6);
+		ap_uint<InWidth/8> p8 = e(InWidth-1, InWidth/8*7); //rightmost pixel
+
+		ap_uint<InWidth/8> pmax12;
+		ap_uint<InWidth/8> pmax34;
+    ap_uint<InWidth/8> pmax56;
+		ap_uint<InWidth/8> pmax78;
+		for(unsigned int ch = 0; ch<channels; ch++){
+#pragma HLS UNROLL                      
+			unsigned int lowBit = ch * bitwidth;
+			unsigned int highBit = (ch+1) * bitwidth -1;
+      ActType c1 = p1(highBit, lowBit);
+      ActType c2 = p2(highBit, lowBit);
+      ActType c3 = p3(highBit, lowBit);
+      ActType c4 = p4(highBit, lowBit);
+      ActType c5 = p5(highBit, lowBit);
+      ActType c6 = p6(highBit, lowBit);
+      ActType c7 = p7(highBit, lowBit);
+      ActType c8 = p8(highBit, lowBit);
+
+			if (c1 > c2)
+				pmax12(highBit, lowBit) = c1;
+			else
+				pmax12(highBit, lowBit) = c2;                
+			if (c3 > c4)
+				pmax34(highBit, lowBit) = c3;
+			else
+				pmax34(highBit, lowBit) = c4;        
+      if (c5 > c6)
+				pmax56(highBit, lowBit) = c5;
+			else
+				pmax56(highBit, lowBit) = c6; 
+      if (c7 > c8)
+				pmax78(highBit, lowBit) = c7;
+			else
+				pmax78(highBit, lowBit) = c8;  
+    }
+		out.write((pmax78,pmax56,pmax34,pmax12));
+	}
+}
 
 /**
  * \brief   ReLU for fixed-point or integer; can accept a bias at input, which it removes
